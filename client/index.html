@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Розклад — UkrRail</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
+</head>
+
+<body class="bg-dark text-light">
+
+  <nav class="navbar navbar-dark bg-black border-bottom border-secondary px-3">
+    <span class="navbar-brand fw-bold mb-0">🚆 UkrRail</span>
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge bg-secondary d-none" id="adminBadge">ADMIN</span>
+      <button class="btn btn-outline-warning btn-sm d-none" id="btnFav" onclick="toggleFavFilter()">★ Улюблені</button>
+      <button class="btn btn-warning btn-sm fw-semibold d-none" id="btnNew"
+        data-bs-toggle="modal" data-bs-target="#newModal">+ Новий маршрут</button>
+      <button class="btn btn-outline-secondary btn-sm" onclick="logout()">Вийти</button>
+    </div>
+  </nav>
+
+  <div class="container-lg py-4">
+
+    <div class="row g-2 mb-3">
+      <div class="col-md-5">
+        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="q"
+          placeholder="Пошук: місто або № поїзда..." />
+      </div>
+      <div class="col-md-3">
+        <input type="date" class="form-control form-control-sm bg-dark text-light border-secondary" id="dateF" />
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-warning btn-sm" onclick="applyFilters()">Знайти</button>
+        <button class="btn btn-outline-secondary btn-sm ms-1" onclick="clearFilters()">✕</button>
+      </div>
+      <div class="col-auto ms-auto">
+        <small class="text-secondary" id="lastUpdate"></small>
+      </div>
+    </div>
+
+    <div id="stLoading" class="text-center py-5 d-none">
+      <div class="spinner-border spinner-border-sm text-warning"></div>
+      <div class="text-secondary small mt-2">Завантаження...</div>
+    </div>
+    <div id="stEmpty" class="text-center py-5 text-secondary d-none">
+      <div class="mb-1">🚂</div>
+      <div class="small">Рейсів не знайдено</div>
+    </div>
+
+    <div class="table-responsive" id="tableWrap">
+      <table class="table table-dark table-hover table-sm align-middle mb-0">
+        <thead class="table-secondary text-uppercase small">
+          <tr>
+            <th></th>
+            <th>№ поїзда</th>
+            <th>Маршрут</th>
+            <th>Відправлення</th>
+            <th>Прибуття</th>
+            <th>В дорозі</th>
+            <th>Статус</th>
+            <th class="d-none" id="thDel"></th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="mt-2"><small class="text-secondary">Рейсів: <span id="cnt">0</span></small></div>
+
+  </div>
+
+  <div class="modal fade" id="newModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content bg-dark text-light border-secondary">
+        <div class="modal-header border-secondary">
+          <h5 class="modal-title" id="modalTitle">Новий маршрут</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-danger py-2 small d-none" id="mErr"></div>
+          <input type="hidden" id="mId" />
+          <div class="mb-3">
+            <label class="form-label small text-secondary">№ поїзда</label>
+            <input class="form-control form-control-sm bg-dark text-light border-secondary" id="mTrain"
+              placeholder="101К" required />
+          </div>
+          <div class="row g-2 mb-3">
+            <div class="col">
+              <label class="form-label small text-secondary">Звідки</label>
+              <input class="form-control form-control-sm bg-dark text-light border-secondary" id="mFrom"
+                placeholder="Київ" required />
+            </div>
+            <div class="col">
+              <label class="form-label small text-secondary">Куди</label>
+              <input class="form-control form-control-sm bg-dark text-light border-secondary" id="mTo"
+                placeholder="Львів" required />
+            </div>
+          </div>
+          <div class="row g-2 mb-3">
+            <div class="col">
+              <label class="form-label small text-secondary">Відправлення</label>
+              <input type="datetime-local" class="form-control form-control-sm bg-dark text-light border-secondary"
+                id="mDep" required />
+            </div>
+            <div class="col">
+              <label class="form-label small text-secondary">Прибуття</label>
+              <input type="datetime-local" class="form-control form-control-sm bg-dark text-light border-secondary"
+                id="mArr" required />
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-secondary">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Скасувати</button>
+          <button type="button" class="btn btn-warning btn-sm fw-semibold" id="mBtn" onclick="submitSchedule()">Зберегти</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script type="module">
+    import { request } from './js/http.js';
+    import { socket } from './js/socket.js';
+    import { requireAuth } from './js/auth.guard.js';
+    import { getFavorites, addFavorite, removeFavorite } from './js/favorites.js';
+
+    requireAuth();
+
+    const isAdmin = localStorage.getItem('userRole') === 'admin';
+    let allData = [];
+    let favIds = new Set();
+    let showFavOnly = false;
+
+    if (isAdmin) {
+      document.getElementById('adminBadge').classList.remove('d-none');
+      document.getElementById('btnNew').classList.remove('d-none');
+      document.getElementById('thDel').classList.remove('d-none');
+    }
+    document.getElementById('btnFav').classList.remove('d-none');
+    document.getElementById('dateF').value = new Date().toISOString().slice(0, 10);
+
+    const $ = id => document.getElementById(id);
+    const ft = iso => new Date(iso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+    const fd = iso => new Date(iso).toLocaleDateString('uk-UA', { day: '2-digit', month: 'short' });
+    const dur = (a, b) => {
+      const m = Math.round((new Date(b) - new Date(a)) / 60000);
+      return m >= 60 ? `${Math.floor(m / 60)}г ${m % 60}хв` : `${m}хв`;
+    };
+
+    function statusBadge() {
+      const r = Math.random();
+      if (r < .75) return '<span class="badge bg-success">Вчасно</span>';
+      if (r < .90) return '<span class="badge bg-warning text-dark">Затримка</span>';
+      return '<span class="badge bg-danger">Скасовано</span>';
+    }
+
+    function toast(msg, type = 'success') {
+      const el = document.createElement('div');
+      el.className = `alert alert-${type} py-2 px-3 small position-fixed bottom-0 end-0 m-3`;
+      el.style.zIndex = 9999;
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 3000);
+    }
+
+    function render(data) {
+      $('cnt').textContent = data.length;
+      $('stEmpty').classList.toggle('d-none', data.length > 0);
+      $('tableWrap').classList.toggle('d-none', data.length === 0);
+      if (!data.length) return;
+
+      $('tbody').innerHTML = data.map(s => `
+      <tr>
+        <td>
+          <button class="btn btn-sm py-0 px-1 ${favIds.has(s.id) ? 'text-warning' : 'text-secondary'}"
+            onclick="toggleFav(${s.id})" title="Улюблені">★</button>
+        </td>
+        <td><code class="text-warning">${s.trainNumber}</code></td>
+        <td>${s.from} → ${s.to}</td>
+        <td>${ft(s.departureTime)} <small class="text-secondary">${fd(s.departureTime)}</small></td>
+        <td>${ft(s.arrivalTime)} <small class="text-secondary">${fd(s.arrivalTime)}</small></td>
+        <td><small class="text-secondary">${dur(s.departureTime, s.arrivalTime)}</small></td>
+        <td>${statusBadge()}</td>
+        ${isAdmin ? `<td>
+          <button class="btn btn-outline-secondary btn-sm py-0 me-1" onclick="openEdit(${s.id})">✎</button>
+          <button class="btn btn-outline-danger btn-sm py-0" onclick="del(${s.id},'${s.trainNumber}')">✕</button>
+        </td>` : ''}
+      </tr>`).join('');
+    }
+
+    async function loadFavs() {
+      try {
+        const favs = await getFavorites();
+        favIds = new Set(favs.map(f => f.scheduleId));
+      } catch {
+        favIds = new Set();
+      }
+    }
+
+    window.toggleFav = async (id) => {
+      try {
+        if (favIds.has(id)) {
+          await removeFavorite(id);
+          favIds.delete(id);
+          toast('Видалено з улюблених');
+        } else {
+          await addFavorite(id);
+          favIds.add(id);
+          toast('Додано до улюблених');
+        }
+        applyFilters();
+      } catch {
+        toast('Помилка', 'danger');
+      }
+    };
+
+    window.toggleFavFilter = () => {
+      showFavOnly = !showFavOnly;
+      $('btnFav').classList.toggle('btn-warning', showFavOnly);
+      $('btnFav').classList.toggle('btn-outline-warning', !showFavOnly);
+      applyFilters();
+    };
+
+    window.load = async () => {
+      $('stLoading').classList.remove('d-none');
+      $('tableWrap').classList.add('d-none');
+      $('stEmpty').classList.add('d-none');
+      try {
+        [allData] = await Promise.all([request('/schedules'), loadFavs()]);
+        applyFilters();
+        $('lastUpdate').textContent = 'Оновлено: ' + new Date().toLocaleTimeString('uk-UA');
+      } catch {
+        toast('Помилка завантаження', 'danger');
+      } finally {
+        $('stLoading').classList.add('d-none');
+      }
+    };
+
+    window.applyFilters = () => {
+      const q = $('q').value.trim().toLowerCase(), d = $('dateF').value;
+      render(allData.filter(s =>
+        (!showFavOnly || favIds.has(s.id)) &&
+        (!q || [s.from, s.to, s.trainNumber].some(v => v.toLowerCase().includes(q))) &&
+        (!d || new Date(s.departureTime).toISOString().startsWith(d))
+      ));
+    };
+
+    window.clearFilters = () => {
+      $('q').value = '';
+      $('dateF').value = new Date().toISOString().slice(0, 10);
+      showFavOnly = false;
+      $('btnFav').classList.remove('btn-warning');
+      $('btnFav').classList.add('btn-outline-warning');
+      render(allData);
+    };
+
+    $('q').addEventListener('keydown', e => e.key === 'Enter' && applyFilters());
+
+    window.del = async (id, no) => {
+      if (!confirm(`Видалити рейс ${no}?`)) return;
+      try {
+        await request(`/schedules/${id}`, { method: 'DELETE' });
+        toast(`Рейс ${no} видалено`);
+        load();
+      } catch {
+        toast('Помилка видалення', 'danger');
+      }
+    };
+
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('newModal'));
+
+    window.openEdit = (id) => {
+      const s = allData.find(x => x.id === id);
+      if (!s) return;
+      $('modalTitle').textContent = 'Редагувати маршрут';
+      $('mId').value = s.id;
+      $('mTrain').value = s.trainNumber;
+      $('mFrom').value = s.from;
+      $('mTo').value = s.to;
+      $('mDep').value = new Date(s.departureTime).toISOString().slice(0, 16);
+      $('mArr').value = new Date(s.arrivalTime).toISOString().slice(0, 16);
+      $('mErr').classList.add('d-none');
+      modal.show();
+    };
+
+    document.getElementById('newModal').addEventListener('show.bs.modal', () => {
+      if (!$('mId').value) {
+        $('modalTitle').textContent = 'Новий маршрут';
+        $('mTrain').value = '';
+        $('mFrom').value = '';
+        $('mTo').value = '';
+        const now = new Date(); now.setHours(now.getHours() + 1, 0, 0, 0);
+        $('mDep').value = now.toISOString().slice(0, 16);
+        now.setHours(now.getHours() + 3);
+        $('mArr').value = now.toISOString().slice(0, 16);
+      }
+      $('mErr').classList.add('d-none');
+    });
+
+    document.getElementById('newModal').addEventListener('hidden.bs.modal', () => {
+      $('mId').value = '';
+    });
+
+    window.submitSchedule = async () => {
+      $('mErr').classList.add('d-none');
+      const dep = $('mDep').value, arr = $('mArr').value;
+      if (new Date(arr) <= new Date(dep)) {
+        $('mErr').textContent = 'Прибуття має бути пізніше відправлення';
+        $('mErr').classList.remove('d-none');
+        return;
+      }
+      const editId = $('mId').value;
+      const body = JSON.stringify({
+        trainNumber: $('mTrain').value.trim(),
+        from: $('mFrom').value.trim(),
+        to: $('mTo').value.trim(),
+        departureTime: dep,
+        arrivalTime: arr,
+      });
+      $('mBtn').disabled = true;
+      try {
+        if (editId) {
+          await request(`/schedules/${editId}`, { method: 'PATCH', body });
+          toast(`Рейс оновлено`);
+        } else {
+          await request('/schedules', { method: 'POST', body });
+          toast(`Рейс ${$('mTrain').value} створено`);
+        }
+        modal.hide();
+        load();
+      } catch (e) {
+        $('mErr').textContent = e.status === 403 ? 'Недостатньо прав' : 'Помилка сервера';
+        $('mErr').classList.remove('d-none');
+      } finally {
+        $('mBtn').disabled = false;
+      }
+    };
+
+    socket.on('schedule:update', () => { toast('Розклад оновлено ↻'); load(); });
+
+    window.logout = () => { localStorage.clear(); location.href = 'login.html'; };
+    load();
+  </script>
+</body>
+
+</html>
