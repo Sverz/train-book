@@ -14,30 +14,86 @@
     <p class="text-secondary mb-4 small">Розклад Рейсів</p>
 
     <div class="alert alert-danger py-2 small d-none" id="err"></div>
+    <div class="alert alert-success py-2 small d-none" id="success"></div>
 
-    <form id="form">
+    <form id="loginForm">
       <div class="mb-3">
         <label class="form-label small text-secondary">Email</label>
-        <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="email"
+        <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="loginEmail"
           placeholder="admin@gmail.com" required />
       </div>
       <div class="mb-3">
         <label class="form-label small text-secondary">Пароль</label>
-        <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary" id="password"
-          placeholder="••••••••" required />
+        <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary"
+          id="loginPassword" placeholder="••••••••" required />
       </div>
-      <button type="submit" class="btn btn-warning btn-sm w-100 fw-semibold" id="btn">Увійти</button>
+      <button type="submit" class="btn btn-warning btn-sm w-100 fw-semibold" id="loginBtn">Увійти</button>
+      <p class="text-center text-secondary small mt-3 mb-0">
+        Немає акаунту?
+        <a href="#" class="text-warning text-decoration-none" id="toRegister">Зареєструватись</a>
+      </p>
+    </form>
+
+    <form id="registerForm" class="d-none">
+      <div class="mb-3">
+        <label class="form-label small text-secondary">Email</label>
+        <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="regEmail"
+          placeholder="ivan@gmail.com" required />
+      </div>
+      <div class="mb-3">
+        <label class="form-label small text-secondary">Пароль</label>
+        <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary" id="regPassword"
+          placeholder="••••••••" required minlength="6" />
+      </div>
+      <button type="submit" class="btn btn-warning btn-sm w-100 fw-semibold" id="registerBtn">Зареєструватись</button>
+      <p class="text-center text-secondary small mt-3 mb-0">
+        Вже є акаунт?
+        <a href="#" class="text-warning text-decoration-none" id="toLogin">Увійти</a>
+      </p>
     </form>
   </div>
 
   <script type="module">
     import { API_URL } from './js/config.js';
 
-    document.getElementById('form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const err = document.getElementById('err');
-      const btn = document.getElementById('btn');
+    const err = document.getElementById('err');
+    const success = document.getElementById('success');
+
+    function showErr(msg) {
+      success.classList.add('d-none');
+      err.textContent = msg;
+      err.classList.remove('d-none');
+    }
+
+    function showSuccess(msg) {
       err.classList.add('d-none');
+      success.textContent = msg;
+      success.classList.remove('d-none');
+    }
+
+    function hideAlerts() {
+      err.classList.add('d-none');
+      success.classList.add('d-none');
+    }
+
+    document.getElementById('toRegister').addEventListener('click', (e) => {
+      e.preventDefault();
+      hideAlerts();
+      document.getElementById('loginForm').classList.add('d-none');
+      document.getElementById('registerForm').classList.remove('d-none');
+    });
+
+    document.getElementById('toLogin').addEventListener('click', (e) => {
+      e.preventDefault();
+      hideAlerts();
+      document.getElementById('registerForm').classList.add('d-none');
+      document.getElementById('loginForm').classList.remove('d-none');
+    });
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideAlerts();
+      const btn = document.getElementById('loginBtn');
       btn.disabled = true;
       btn.textContent = 'Перевірка...';
 
@@ -46,8 +102,8 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            email: document.getElementById('email').value.trim(),
-            password: document.getElementById('password').value,
+            email: document.getElementById('loginEmail').value.trim(),
+            password: document.getElementById('loginPassword').value,
           }),
         });
         if (!res.ok) throw new Error(res.status === 401 ? 'Невірний email або пароль' : 'Помилка сервера');
@@ -57,11 +113,42 @@
         localStorage.setItem('userRole', payload.role);
         window.location.href = 'index.html';
       } catch (e) {
-        err.textContent = e.message;
-        err.classList.remove('d-none');
+        showErr(e.message);
       } finally {
         btn.disabled = false;
         btn.textContent = 'Увійти';
+      }
+    });
+
+    document.getElementById('registerForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideAlerts();
+      const btn = document.getElementById('registerBtn');
+      btn.disabled = true;
+      btn.textContent = 'Реєстрація...';
+
+      try {
+        const res = await fetch(API_URL + '/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: document.getElementById('regEmail').value.trim(),
+            password: document.getElementById('regPassword').value,
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.message || 'Помилка реєстрації');
+        }
+        showSuccess('Акаунт створено! Тепер увійдіть.');
+        document.getElementById('registerForm').classList.add('d-none');
+        document.getElementById('loginForm').classList.remove('d-none');
+        document.getElementById('loginEmail').value = document.getElementById('regEmail').value;
+      } catch (e) {
+        showErr(e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Зареєструватись';
       }
     });
   </script>
